@@ -1,4 +1,4 @@
-Ticker,Rating,Spread,Price,Reference,Mult
+Ticker,Rating,Spread,RefPrice,Reference,Mult
 TRI.PR.B,P3H,0,13.22,P,0.7
 PWF.PR.A,P2L,,12.86,P,0.7
 BAM.PR.E,P2L,,16.19,P,1
