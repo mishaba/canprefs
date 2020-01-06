@@ -134,13 +134,6 @@ def annualized_gain_cg_and_dividend_decimal(num_years, current_price, tbill_rate
 
 
 
-# define 3 scenarios, with corresponding probabilities and names.
-# Name: {tbillrate, number of years, probability}
-TBILL_SCN = { 
-    "Constant" :  (1.66, 1, 0.15),
-    "SlightDrop": (1.40, 1, 0.45),
-    "BigDrop":    (1.10, 1, 0.25) ,
-    "Panic":      (0.70, 1, 0.15)}
 
 
 SPREAD_ADJUST = {
@@ -152,7 +145,7 @@ SPREAD_ADJUST = {
 # Apply a constant market spread delta to each value. 
 # Enable hack mode which adjusts on a per-security basis
 
-def create_tbill_scenarios_from_mspread(mspread_delta,df, enable_hack=False) :
+def create_tbill_scenarios_from_mspread(mspread_delta,df, tbill_scenarios, enable_hack=False) :
     df["EffMSpread"] = [max(x  + mspread_delta, MINIMUM_MARKET_SPREAD) for x in df["MSpread"]]
     
    
@@ -165,7 +158,7 @@ def create_tbill_scenarios_from_mspread(mspread_delta,df, enable_hack=False) :
     df["MSpread_Delta"] = mspread_delta
     df["Expected_Gain"] = 0.0
     
-    for scn_name,(rate,years,probability) in TBILL_SCN.items() :
+    for scn_name,(rate,years,probability) in tbill_scenarios.items() :
         
         df[scn_name] = [annualized_gain_cg_and_dividend_decimal(years, price, rate, 
                                                  mspread,spread) for (price,mspread,spread) in
@@ -187,11 +180,102 @@ def convert_ticker_to_yahoo(orig):
     return result
 
 
-def fetch_last_close_in_dollars(standard_ticker) :
+# Relies on global 'session' variable
+
+def init_fetch_session() :
+    expire_after = datetime.timedelta(hours=3)
+    session = requests_cache.CachedSession(cache_name='cache', backend='sqlite', expire_after=expire_after)
+    return session
+
+
+    
+def fetch_last_close_in_dollars(standard_ticker, session ) :
     ticker = convert_ticker_to_yahoo(standard_ticker)
-    df = pdr.get_data_yahoo(ticker, start=datetime.datetime(2019,12,31),end= date.today())
+#    df = pdr.get_data_yahoo(ticker, start=datetime.datetime(2019,12,31),end= date.today())
+    df = web.DataReader(ticker, 'yahoo', datetime.datetime(2019,12,31), date.today(), session=session)
     last_close = pd.Series(df['Adj Close'])[-1]
     return round(last_close,2)
 
 
+TICKER_BLACKLIST = ['GMP.PR.C', 'NPI.PR.B']
+COLUMN_BLACKLIST = ['Mult', 'Reference']
+
+def filter_floating_reset_list(floats_frame) :
+    # Keep only shares indexed to T-bills
+    df = floats_frame[floats_frame["Reference"]=='T'].copy()
+    # Remove unused columns
+    df.drop(columns=COLUMN_BLACKLIST,inplace=True)
+    # clean up blacklist
+    df = df[[x not in TICKER_BLACKLIST for x in df['Ticker']]]
+    return df
+
+# Assumes tickers available
+#
+# Eventually: if can't fetch prices, use reference prices instead
+
+def update_data_frame_with_prices_and_drop_reference(df, session) :
+    df['Price'] = [fetch_last_close_in_dollars(x, session) for x in df['Ticker']]
+
+    df.drop(columns=['RefPrice'],inplace=True,errors='ignore')
+
+    return df
+
+# compute to 4 decimal places
+def update_dataframe_with_market_spread(df) :
+    df["MSpread"] = [round(float_market_spread_in_percent(price,TBILL_PERCENT,spread),4) for (price,spread) in 
+                     zip(df["Price"],df["Spread"])]
+    return df
+
+def update_dataframe_with_rating_averages(df) :
+    ms_averages = df[["Rating","MSpread"]].groupby(
+    ['Rating']).agg(AvgSpread=('MSpread','mean')).reset_index()
+
+    tpm = df.merge(ms_averages,on='Rating')
+    
+    tpm['SpreadToAverage'] = tpm['MSpread'] - tpm['AvgSpread']
+
+    return tpm
+
+
+
+
+#ax = ms_averages[ms_averages['Rating']!='NR'].plot(x="Rating",y='AvgSpread')
+
+
+def create_tbill_scenarios_per_market_spreads(df, tbill_scenarios, spread_deltas, predict_mspread_reduction=True) :
+
+    foo = pd.concat([create_tbill_scenarios_from_mspread(delta,df.copy(), tbill_scenarios, predict_mspread_reduction) 
+                      for delta in spread_deltas], axis = 0)
+    foo.reset_index(drop=True, inplace=True)
+    return foo
+
+
+
+# Ranking section
+
+def do_the_ranking(xdf, tbill_scenarios, ranks_to_keep):
+
+    scenario_names = tbill_scenarios.keys()
+    # print(scenario_names)
+    rank_names = ['Rank' + x for x in scenario_names]
+    #  print(rank_names)
+    
+    def rank_group(df):
+        for rank_name,scenario_name in zip(rank_names, scenario_names):
+            list_of_largest_n_values = df[scenario_name].nlargest(n=ranks_to_keep).values
+            df[rank_name] = [1 if x in list_of_largest_n_values else 0 
+                             for x in df[scenario_name]]
+        df['RankSum'] = df[rank_names].sum(axis=1)
+        return df
+
+    ranked = xdf.groupby(['MSpread_Delta']).apply(rank_group)
+    ranked[(ranked['RankSum']) > 0 ][
+       ['Ticker','MSpread_Delta','RankSum'] + rank_names].sort_values(
+           by='Ticker')
+
+     
+    baz = ranked[['Ticker','RankSum','Expected_Gain']].groupby(['Ticker']).agg(
+       TotalRankSum=('RankSum','sum'),AvgExpectedGain=('Expected_Gain','mean')).reset_index().sort_values(by='AvgExpectedGain',ascending=False)
+
+    return baz
 
