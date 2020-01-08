@@ -172,8 +172,6 @@ def create_tbill_scenarios_from_mspread(mspread_delta,df, tbill_scenarios, enabl
     return df
 
 
-  
-
 def convert_ticker_to_yahoo(orig): 
     splits = orig.split('.')
     result = splits[0] + "-p" + splits[2] + ".TO"
@@ -221,8 +219,8 @@ def update_data_frame_with_prices_and_drop_reference(df, session) :
     return df
 
 # compute to 4 decimal places
-def update_dataframe_with_market_spread(df) :
-    df["MSpread"] = [round(float_market_spread_in_percent(price,TBILL_PERCENT,spread),4) for (price,spread) in 
+def update_dataframe_with_market_spread(df, tbill_percent) :
+    df["MSpread"] = [round(float_market_spread_in_percent(price,tbill_percent,spread),4) for (price,spread) in 
                      zip(df["Price"],df["Spread"])]
     return df
 
