@@ -21,32 +21,36 @@ def bond_ytm(price, par, T, coup, freq=2, guess=0.05):
     return optimize.newton(ytm_func, guess)
 
 
-def float_dividend_tbill(tbill_rate_in_percent, 
+def dividend_from_reference_and_issue_spread(reference_rate_in_percent, 
                                  issue_spread_in_bips, par=25.00):
-    rate_in_percent = tbill_rate_in_percent + issue_spread_in_bips/100.0;
+    rate_in_percent = reference_rate_in_percent + issue_spread_in_bips/100.0;
     dividend = par * rate_in_percent / 100.0
     return dividend
 
-assert(float_dividend_tbill(1.5, 137)== 25 * (1.5 + 137/100)/100)
 
-def float_current_yield(stock_price, tbill_rate_in_percent, issue_spread_in_bips, par=25):
-    current_yield =  float_dividend_tbill(tbill_rate_in_percent, issue_spread_in_bips, par)/stock_price
+def yield_from_reference_and_issue_spread(stock_price, ref_rate_in_percent, issue_spread_in_bips, par=25):
+    yield =  dividend_from_reference_and_issue_spread(ref_rate_in_percent, issue_spread_in_bips, par)/stock_price
     
-    return current_yield
+    return yield
 
 
-assert(float_current_yield(10.00, 1.6, 340, 25) == 0.125)
+# Market spread from reference rate and spread applies mostly to floats, since they reset frequently
 
-def float_market_spread_in_percent(stock_price, tbill_rate_in_percent, 
+def market_spread_from_ref_rate_and_issue_spread_in_percent(stock_price, ref_rate_in_percent, 
                                    issue_spread_in_bips, par=25):
-    spread = float_current_yield(stock_price, tbill_rate_in_percent, 
+    market_spread = yield_from_reference_and_issue_spread(stock_price, ref_rate_in_percent, 
                                  issue_spread_in_bips, par) *100 \
-               - (tbill_rate_in_percent )
-    return spread
+               - (ref_rate_in_percent )
+    return market_spread
 
 
+# This applies more to fixed resets since the dividend is frozen for a long time
+def market_spread_from_dividend_in_percent(price, dividend, ref_rate_in_percent) :
+     current_yield = dividend/price
+     market_spread = current_yield*100 -ref_rate
+     return market_spread
 
-float_market_spread_in_percent(15.00, 1.6, 340, 25)
+
 
 # Predict price of FloatingReset given a new Tbill rate
 # with an existing market spread
@@ -58,34 +62,33 @@ def declared_dividend(tbill_rate_in_percent, issue_spread_in_bips, par=25):
 
 # disallow any market spread below 1%. Otherwise people will just buy Tbills
 
-MINIMUM_MARKET_SPREAD = 0.9
+MINIMUM_TBILL_MARKET_SPREAD = 0.9
 
-def float_price_given_tbill_and_market_spread(tbill_rate_in_percent,
+def share_price_given_ref_rate_and_market_spread(ref_rate_in_percent,
                                               market_spread_in_percent, 
-                                              issue_spread_in_bips, par=25, refi_max=0.75):
+                                              issue_spread_in_bips, par=25, refi_max=0.75,
+                                              min_spread = MINIMUM_TBILL_MARKET_SPREAD):
 
   
-    # Clamp market spread to 0.9
-    eff_market_spread_in_percent = max(market_spread_in_percent,MINIMUM_MARKET_SPREAD)
+    # Clamp market spread to a mininum (useful for scenarios). This doesn't really belong here but outside
+    eff_market_spread_in_percent = max(market_spread_in_percent,min_spread)
     
-    yearly_dividend = declared_dividend(tbill_rate_in_percent, issue_spread_in_bips, par)
-    demanded_yield_in_percent = tbill_rate_in_percent + eff_market_spread_in_percent
+    yearly_dividend = declared_dividend(ref_rate_in_percent, issue_spread_in_bips, par)
+    demanded_yield_in_percent = ref_rate_in_percent + eff_market_spread_in_percent
     price = yearly_dividend/demanded_yield_in_percent*100
-   #  print(yearly_dividend, demanded_yield_in_percent, price)
 
     # Clamp price at a point at which a CFO would refinance
     price = min(price,par+refi_max)
     return price
 
 
-# float_price_given_tbill_and_market_spread(1.4, 6.2, 418,25)
 
-def float_capital_gain_given_tbill_and_market_spread(current_price, 
-                                                    tbill_rate_in_percent,
+def share_capital_gain_given_ref_rate_and_market_spread(current_price, 
+                                                    ref_rate_in_percent,
                                                      market_spread_in_percent,
                                                     issue_spread_in_bips,
                                                     par=25):
-    new_price = float_price_given_tbill_and_market_spread(tbill_rate_in_percent,
+    new_price = share_price_given_ref_rate_and_market_spread(ref_rate_in_percent,
                                                           market_spread_in_percent,
                                                          issue_spread_in_bips,
                                                          par)
@@ -95,10 +98,10 @@ def float_capital_gain_given_tbill_and_market_spread(current_price,
     
 # cap_gain = float_capital_gain_given_tbill_and_market_spread(18.60, 1.4, 6.1943, 418,25)
 
-def net_gain_cg_and_dividend(num_years, current_price, tbill_rate_in_percent,
+def net_gain_cg_and_dividend(num_years, current_price, ref_rate_in_percent,
                             market_spread_in_percent, issue_spread_in_bips, par=25) :
-    cap_gain = float_capital_gain_given_tbill_and_market_spread(current_price,
-                                                                tbill_rate_in_percent,
+    cap_gain = share_capital_gain_given_ref_rate_and_market_spread(current_price,
+                                                                ref_rate_in_percent,
                                                                 market_spread_in_percent,
                                                                 issue_spread_in_bips,
                                                                 par=25)
@@ -114,10 +117,10 @@ def net_gain_cg_and_dividend(num_years, current_price, tbill_rate_in_percent,
 # computes total gain of a preferred share over a number of years.
 # this includes the predicted capital gain (or loss), plus the dividend income
 
-def annualized_gain_cg_and_dividend_decimal(num_years, current_price, tbill_rate_in_percent,
+def annualized_gain_cg_and_dividend_decimal(num_years, current_price, ref_rate_in_percent,
                             market_spread_in_percent, issue_spread_in_bips, par=25) :
     net_gain =  net_gain_cg_and_dividend(num_years, current_price,
-                                                                tbill_rate_in_percent,
+                                                                ref_rate_in_percent,
                                                                 market_spread_in_percent,
                                                                 issue_spread_in_bips,
                                                                 par=25)
@@ -146,7 +149,7 @@ SPREAD_ADJUST = {
 # Enable hack mode which adjusts on a per-security basis
 
 def create_tbill_scenarios_from_mspread(mspread_delta,df, tbill_scenarios, enable_hack=False) :
-    df["EffMSpread"] = [max(x  + mspread_delta, MINIMUM_MARKET_SPREAD) for x in df["MSpread"]]
+    df["EffMSpread"] = [max(x  + mspread_delta, MINIMUM_TBILL_MARKET_SPREAD) for x in df["MSpread"]]
     
    
     
@@ -174,7 +177,8 @@ def create_tbill_scenarios_from_mspread(mspread_delta,df, tbill_scenarios, enabl
 
 def convert_ticker_to_yahoo(orig): 
     splits = orig.split('.')
-    result = splits[0] + "-p" + splits[2] + ".TO"
+    prefix = "-p" if splits[1].upper() == "PR" else "-pf"
+    result = splits[0] + prefix + splits[2] + ".TO"
     return result
 
 
@@ -188,10 +192,13 @@ def init_fetch_session() :
 
     
 def fetch_last_close_in_dollars(standard_ticker, session ) :
+
     ticker = convert_ticker_to_yahoo(standard_ticker)
+#    print("Processing " + standard_ticker + ": " + ticker)
+    
 #    df = pdr.get_data_yahoo(ticker, start=datetime.datetime(2019,12,31),end= date.today())
-    df = web.DataReader(ticker, 'yahoo', datetime.datetime(2019,12,31), date.today(), session=session)
-    last_close = pd.Series(df['Adj Close'])[-1]
+    tmp_df = web.DataReader(ticker, 'yahoo', datetime.datetime(2019,12,31), datetime.datetime.today(), session=session)
+    last_close = pd.Series(tmp_df['Adj Close'])[-1]
     return round(last_close,2)
 
 
@@ -210,7 +217,7 @@ def filter_floating_reset_list(floats_frame) :
 # Assumes tickers available
 #
 # Eventually: if can't fetch prices, use reference prices instead
-
+# This applies to floats and fixed
 def update_data_frame_with_prices_and_drop_reference(df, session) :
     df['Price'] = [fetch_last_close_in_dollars(x, session) for x in df['Ticker']]
 
@@ -218,9 +225,9 @@ def update_data_frame_with_prices_and_drop_reference(df, session) :
 
     return df
 
-# compute to 4 decimal places
-def update_dataframe_with_market_spread(df, tbill_percent) :
-    df["MSpread"] = [round(float_market_spread_in_percent(price,tbill_percent,spread),4) for (price,spread) in 
+# generalize this to accept some reference rate
+def update_dataframe_with_market_spread(df, ref_rate_percent, column_name="MSpread") :
+    df[column_name] = [round(market_spread_from_ref_rate_and_issue_spread_in_percent(price,ref_percent,spread),4) for (price,spread) in 
                      zip(df["Price"],df["Spread"])]
     return df
 
@@ -276,4 +283,9 @@ def do_the_ranking(xdf, tbill_scenarios, ranks_to_keep):
        TotalRankSum=('RankSum','sum'),AvgExpectedGain=('Expected_Gain','mean')).reset_index().sort_values(by='AvgExpectedGain',ascending=False)
 
     return baz
+
+ 
+
+    
+    
 
