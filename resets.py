@@ -5,7 +5,8 @@ import datetime as datetime
 from prefutils import *
 
 import pandas_datareader as pdr
-import datetime 
+import datetime as datetime
+import calendar as calendar
 import pandas as pd
 import numpy as np
 
@@ -21,7 +22,7 @@ from datetime import date
 
 # for now, ignore market holidays
 def payment_day_last_of_month(year, month) :
-    days_in_month = monthrange(year,month)[1]
+    days_in_month = calendar.monthrange(year,month)[1]
     return datetime.datetime(year,month,days_in_month)
 
 def next_month(x) :
@@ -30,7 +31,7 @@ def next_month(x) :
 def next_payment_date_after_date(after_date, month_list) :
     month = after_date.month
     # if on last day of month, then search next month
-    if after_date.day == monthrange(after_date.year,month)[1] :
+    if after_date.day == calendar.monthrange(after_date.year,month)[1] :
         month = next_month(month)
     
     # search the next month
@@ -70,7 +71,7 @@ def build_cashflow_list(purchase_date, purchase_price, reset_date, maturity_date
 
     add_initial_purchase_cashflow(cashflows, purchase_date, purchase_price)
 
-    if eval_date < reset_date :
+    if maturity_date < reset_date :
         final_price = cur_price
     else:
         final_price = maturity_price
@@ -100,8 +101,114 @@ def year_frac_from_today(reset_date_str) :
 
 
 def dividend_after_reset(issue_reset_spread_bips, goc5_at_reset_decimal, par=25) :
-    yield_at_reset = (estimated_goc5_at_reset_decimal + issue_reset_spread_bips/10000) 
+    yield_at_reset = (goc5_at_reset_decimal + issue_reset_spread_bips/10000) 
     return par*yield_at_reset
+
+
+
+# ======================================================================================
+
+# OK, here's the big YTM calculation for a given scenario
+
+
+# Here we go: compute YTW from some GOC5 at some reset date
+def compute_ytm(cur_date, curprice, curdiv, reset_date,
+                  ir_spread_bips, 
+                  mspread_percent, future_goc5_percent, 
+                future_div,
+                maturity_date, month_cycle, verbose=False) :
+    
+    # compute future price, which will be 
+    
+    future_price = share_price_given_ref_rate_and_market_spread(
+        future_goc5_percent, mspread_percent, ir_spread_bips)
+    
+    
+    flows = build_cashflow_list(cur_date, curprice, 
+                            reset_date, 
+                            maturity_date, future_price,
+                            month_cycle,
+                            curdiv, 
+                            future_div)
+    if verbose:
+        # pp.pprint(flows)
+        print("Future Div (int): ", future_div)
+        print("Future Price : ", future_price)
+    
+    return xirr(flows, 0.2)
+
+
+
+# ============
+
+##  Fixed reset equivalents to all this
+
+## Process
+## 1. For a given market spread, calculate GOC5 scenarios
+## 2. Adjust each ticker
+
+GOC5_SCN = { 
+    "Constant" :  (1.58,  0.10)
+#   "SlightRise": (1.80,  0.10),
+#    "Drop":       (1.30,  0.30) ,
+#    "Panic":      (0.90,  0.20)
+}
+
+
+
+# Resets are odd: their market spread is dependent on a variety of fields, rather than
+# the current market spread.
+#
+# Model C6 : 6-month cliff.   
+# Model C0:  0-month cliff
+# Model M:   reversion to mean
+
+CURRENT_GOC5_PERCENT = 1.58
+
+def create_freset_scenarios(df, scenarios, ms_model, enable_hack=False, minspread=MINIMUM_TBILL_MARKET_SPREAD) :
+    df["EffMSpread"] = [max(x, minspread) for x in df["MSpread"]]
+    
+    if enable_hack:
+        adjust_hack = df['Ticker'].map(SPREAD_ADJUST).fillna(value=0)
+        df['EffMSpread'] += adjust_hack
+        
+    df["Expected_Gain"] = 0.0
+
+    # for now, ignore 'which model'
+
+    # For each scenario, compute yield to maturity
+
+    today = datetime.datetime.today()
+    maturity_date = today+datetime.timedelta(days=365*5)
+    month_cycle = gwo_months # GLOBAL!
+    
+    
+    for scn_name,(futgoc5_percent,probability) in scenarios.items() :
+        scenario_ytm = 'YTM'+scn_name
+        
+        df[scenario_ytm] = [
+            compute_ytm_cliff(30*6, # number of days before cliff
+                              today ,
+                              curprice, # Current price
+                              curdiv, # Current div
+                              reset_date,
+                              reset_spread_bips, # Bips
+                              mspread_percent,  # MSpread in Percent
+                              futgoc5_percent,   # Future GOC5
+                              maturity_date ,
+                              month_cycle)
+            for
+            (curprice, curdiv, reset_date, reset_spread_bips, mspread_percent)
+            in
+            zip(df['Price'],df['Div'],df['ResetDT'],df['Spread'],df['MSpread'])
+            ]
+        
+            
+        df['Expected_Gain'] += (df[scenario_ytm] * probability)
+        
+    return df
+
+
 
 
 

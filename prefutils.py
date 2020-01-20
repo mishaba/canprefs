@@ -1,7 +1,7 @@
 import scipy.optimize as optimize
 
 import pandas_datareader as pdr
-import datetime 
+import datetime as datetime
 import pandas as pd
 import numpy as np
 
@@ -29,9 +29,9 @@ def dividend_from_reference_and_issue_spread(reference_rate_in_percent,
 
 
 def yield_from_reference_and_issue_spread(stock_price, ref_rate_in_percent, issue_spread_in_bips, par=25):
-    yield =  dividend_from_reference_and_issue_spread(ref_rate_in_percent, issue_spread_in_bips, par)/stock_price
+    foo =  dividend_from_reference_and_issue_spread(ref_rate_in_percent, issue_spread_in_bips, par) / stock_price
     
-    return yield
+    return foo
 
 
 # Market spread from reference rate and spread applies mostly to floats, since they reset frequently
@@ -47,7 +47,7 @@ def market_spread_from_ref_rate_and_issue_spread_in_percent(stock_price, ref_rat
 # This applies more to fixed resets since the dividend is frozen for a long time
 def market_spread_from_dividend_in_percent(price, dividend, ref_rate_in_percent) :
      current_yield = dividend/price
-     market_spread = current_yield*100 -ref_rate
+     market_spread = current_yield*100 -ref_rate_in_percent
      return market_spread
 
 
@@ -67,7 +67,8 @@ MINIMUM_TBILL_MARKET_SPREAD = 0.9
 def share_price_given_ref_rate_and_market_spread(ref_rate_in_percent,
                                               market_spread_in_percent, 
                                               issue_spread_in_bips, par=25, refi_max=0.75,
-                                              min_spread = MINIMUM_TBILL_MARKET_SPREAD):
+                                                 min_spread = MINIMUM_TBILL_MARKET_SPREAD,
+                                                 verbose=False):
 
   
     # Clamp market spread to a mininum (useful for scenarios). This doesn't really belong here but outside
@@ -79,6 +80,10 @@ def share_price_given_ref_rate_and_market_spread(ref_rate_in_percent,
 
     # Clamp price at a point at which a CFO would refinance
     price = min(price,par+refi_max)
+
+    if verbose:
+        print(eff_market_spread_in_percent, yearly_dividend, demanded_yield_in_percent, price)
+
     return price
 
 
@@ -105,7 +110,7 @@ def net_gain_cg_and_dividend(num_years, current_price, ref_rate_in_percent,
                                                                 market_spread_in_percent,
                                                                 issue_spread_in_bips,
                                                                 par=25)
-    dividend_gain= num_years * declared_dividend(tbill_rate_in_percent,
+    dividend_gain= num_years * declared_dividend(ref_rate_in_percent,
                                                  issue_spread_in_bips,par)
     # print("Cap Gain: ", cap_gain)
     # print("Div Gain:", dividend_gain)
@@ -145,13 +150,12 @@ SPREAD_ADJUST = {
 }
 
 
+
 # Apply a constant market spread delta to each value. 
 # Enable hack mode which adjusts on a per-security basis
 
 def create_tbill_scenarios_from_mspread(mspread_delta,df, tbill_scenarios, enable_hack=False) :
     df["EffMSpread"] = [max(x  + mspread_delta, MINIMUM_TBILL_MARKET_SPREAD) for x in df["MSpread"]]
-    
-   
     
     if enable_hack:
         adjust_hack = df['Ticker'].map(SPREAD_ADJUST).fillna(value=0)
@@ -169,7 +173,7 @@ def create_tbill_scenarios_from_mspread(mspread_delta,df, tbill_scenarios, enabl
         df['Expected_Gain'] += (df[scn_name] * probability)
         
         
-        df['Price'+scn_name] =[float_price_given_tbill_and_market_spread(rate,
+        df['Price'+scn_name] =[share_price_given_ref_rate_and_market_spread(rate,
                                               effmspread, spread) for (effmspread,spread) in
                                zip(df['EffMSpread'],df['Spread'])]
     return df
@@ -226,8 +230,8 @@ def update_data_frame_with_prices_and_drop_reference(df, session) :
     return df
 
 # generalize this to accept some reference rate
-def update_dataframe_with_market_spread(df, ref_rate_percent, column_name="MSpread") :
-    df[column_name] = [round(market_spread_from_ref_rate_and_issue_spread_in_percent(price,ref_percent,spread),4) for (price,spread) in 
+def update_dataframe_with_market_spread_from_issue_spread(df, ref_rate_percent, column_name="MSpread") :
+    df[column_name] = [round(market_spread_from_ref_rate_and_issue_spread_in_percent(price,ref_rate_percent,spread),4) for (price,spread) in 
                      zip(df["Price"],df["Spread"])]
     return df
 
@@ -286,6 +290,13 @@ def do_the_ranking(xdf, tbill_scenarios, ranks_to_keep):
 
  
 
-    
+
     
 
+# generalize this to accept some reference rate
+def update_dataframe_with_market_spread_from_dividend(df, ref_rate_percent, column_name="MSpread") :
+
+ 
+    df[column_name] = [round(market_spread_from_dividend_in_percent(price,dividend,ref_rate_percent),4)
+                       for (price,dividend) in zip(df["Price"],df["Div"])]
+    return df
