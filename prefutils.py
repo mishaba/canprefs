@@ -1,12 +1,12 @@
 import scipy.optimize as optimize
 
-import pandas_datareader as pdr
+# import pandas_datareader as pdr
 import datetime as datetime
 import pandas as pd
 import numpy as np
 
-import pandas_datareader.data as web
-import requests_cache
+# import pandas_datareader.data as web
+# import requests_cache
 from datetime import date
 
 def bond_ytm(price, par, T, coup, freq=2, guess=0.05):
