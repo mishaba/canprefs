@@ -205,6 +205,13 @@ def calculate_avg_yield_per_rating(df):
                          aggfunc=['mean','count'])
     return foo
 
+def calculate_avg_per_rating(df, column='CurYieldPct'):
+    foo = pd.pivot_table(data=df,
+                         index=['Rating'],
+                         values=column,
+                         aggfunc=['mean','count'])
+    return foo
+
 
 #==============
 
@@ -242,8 +249,9 @@ def test_future_price():
 
 # First, build a portfolio from the best candidate in each scenario
 
-def summarize_best_by_column(df, colname='CurYieldPct'):
-    return  df[df[colname] == df.groupby('Rating')[colname].transform('max')]
+def summarize_best_by_column(df, colname='CurYieldPct', keyname='Rating'):
+    return  df[df[colname] == df.groupby(keyname)[colname].transform('max')]
+
 
 
 def create_portfolio_best_in_class(mydf, rating, scenarios):
