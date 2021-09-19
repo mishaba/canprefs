@@ -2,22 +2,28 @@
 
 from xirr import xirr 
 import datetime as datetime
+# TODO: fix this
 from prefutils import *
+import prefutils as pu
 
-import pandas_datareader as pdr
+
+# import pandas_datareader as pdr
 
 import calendar as calendar
 import pandas as pd
 import numpy as np
 
-import pandas_datareader.data as web
-import requests_cache
+
 import matplotlib.pyplot as plt
 from datetime import date
+import datetime as dt
 
 import pprint as pp
 
 def month_cycle_from_start_month(letter):
+    '''
+    Computes the month cycle from a letter description.  Cycles start in January, February, or March.
+    '''
     if letter == "J":
         return [1,4,7,10]
     elif letter == "F":
@@ -36,6 +42,7 @@ def payment_day_last_of_month(year, month) :
 def next_month(x) :
     return 1 if x>= 12 else x+1
 
+# 
 def next_payment_date_after_date(after_date, month_list) :
     month = after_date.month
     # if on last day of month, then search next month
@@ -52,17 +59,23 @@ def next_payment_date_after_date(after_date, month_list) :
     return payment_day_last_of_month(which_year, month)
 
 
+
 # Expects final price to be determined externally
 
 def build_cashflow_list(purchase_date, purchase_price, reset_date, maturity_date, maturity_price,
                         payment_months, 
-                        current_dividend_annual, reset_dividend_annual) :
+                        current_dividend_annual, reset_dividend_annual, ex_day_of_month = 15) :
+    '''
+    
+    '''
+    
     group = []
-    next_date = next_payment_date_after_date(purchase_date, payment_months)
+    next_date = next_div_date(purchase_date, payment_months, ex_day_of_month)
 
+    print("Next: ", next_date)
     while (next_date < maturity_date) :
         group.append(next_date)
-        next_date = next_payment_date_after_date(next_date, payment_months)   
+        next_date = next_div_date(next_date, payment_months, ex_day_of_month)   
     
     # walk date list; if before reset, use current, otherwise reset
     div_q = current_dividend_annual/4
@@ -111,7 +124,7 @@ def dividend_after_reset(issue_reset_spread_bips, goc5_at_reset_decimal, par=25)
 
 
 
-# ======================================================================================
+# =======<===============================================================================
 
 # Here we go: compute YTM from some GOC5 at some reset date
 
@@ -122,12 +135,29 @@ def dividend_after_reset(issue_reset_spread_bips, goc5_at_reset_decimal, par=25)
 #    market spread at maturity
 
 
+# This function assumes too much.  Let's break into two:
+# 1st function is given a price.
+
+
 def compute_ytm(cur_date, curprice, curdiv, reset_date,
                   ir_spread_bips, 
                   mspread_percent, maturity_goc5_percent, 
                 future_div,
                 maturity_date, month_cycle, verbose=False) :
+    '''
+    cur_date: datetime object
+    curprice: purchase price
+    curdiv: current dividend
+    reset_date: datetime bject
+    ir_spread_bips: issue reset spread in Bips
+    mspread_percept: estimate of market spread
+    maturity_goc5_percent
+    future_div
+    maturity_date,
+    month_cycle : letter, J,F,M. This will be expanded to date.
 
+
+    '''
     if maturity_date < reset_date:
         maturity_price = curprice
     else:
@@ -149,8 +179,40 @@ def compute_ytm(cur_date, curprice, curdiv, reset_date,
         print("Maturity Date: ", maturity_date)
         print("Reset  Date: ", reset_date)
     
-    return xirr(flows, 0.2)
+    return xirr(flows, 0.04)
 
+# Let's make a simple function that doesn't do too much prediction
+
+def compute_ytm_basic(buy_date, curprice, curdiv, reset_date,
+                      future_div,  maturity_price, maturity_date, month_cycle, verbose=False, guess=0.05) :
+    '''
+    cur_date: datetime object
+    curprice: purchase price
+    curdiv: current dividend
+    reset_date: datetime bject
+    ir_spread_bips: issue reset spread in Bips
+    mspread_percept: estimate of market spread
+    maturity_goc5_percent
+    future_div
+    maturity_date,
+    month_cycle : letter, J,F,M. This will be expanded to date.
+    '''
+
+    flows = build_cashflow_list(buy_date, curprice, 
+                            reset_date, 
+                            maturity_date,
+                            maturity_price,
+                            month_cycle,
+                            curdiv, 
+                            future_div)
+    if verbose:
+        pp.pprint(flows)
+        print("Future Div (int): ", future_div)
+        print("Maturity Price : ", maturity_price)
+        print("Maturity Date: ", maturity_date)
+        print("Reset  Date: ", reset_date)
+    
+    return xirr(flows, guess)
 
 
 # ============
@@ -328,4 +390,36 @@ def do_the_ranking_freset(xdf, goc5_scenarios, ranks_to_keep):
 # Why does TRP.PR.E not care about scenario (oh, reset date is 4 years out)
 
 ## Manual debugging section
+
+
+## Untility
+
+def next_div_date(from_date, month_list, ex_day_of_month):
+    '''
+    Construct datetime objects and eval
+    '''
+    from_year = from_date.year    
+    for month_num in month_list:
+        # construct a target date
+        eval_date = dt.datetime(from_year, month_num, ex_day_of_month)
+        if (eval_date > from_date):
+           # print("Found it: ", eval_date)
+            return eval_date
+        
+    # Didnt find it,so must be the first in the sequence, but next year
+    return dt.datetime(from_year+1, month_list[0], ex_day_of_month)
+
+
+def test_next_div_date():
+
+    print(next_div_date(dt.datetime(2021, 8, 12) , [1,4,7,10]  , 15)) 
+    print(next_div_date(dt.datetime(2021,11, 12) , [1,4,7,10]  , 15)) 
+
+    print(next_div_date(dt.datetime(2021, 8, 12) , [2,5,8,11]  , 15)) 
+    print(next_div_date(dt.datetime(2021, 8, 16) , [2,5,8,11]  , 15)) 
+    print(next_div_date(dt.datetime(2021,11, 16) , [2,5,8,11]  , 15))
+
+
+    
+
 

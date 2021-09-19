@@ -5,10 +5,26 @@ import json
 import pandas as pd
 
 
+def fixme(x):
+    if len(x) > 0:
+        return round(float(x),3)
+    else:
+        return 0.0
+    
+
 
 def setup_databases(preffile="./floats.csv", ratingsfile="./ratingsdb.json", 
                         interestfile="./interest_rates.json"):
-    df = pd.read_csv(preffile)
+    df = pd.read_csv(preffile,parse_dates=[3,4],
+                     dtype = {'Mult': float}
+                     
+    )
+    ## Clean up the Mult field. There must be a better way
+    df['MultF'] = [ round(float(x),4) for x in df['Mult']]
+    df.drop(columns=['Mult'], inplace=True)
+    df.rename(columns={'MultF': 'Mult'}, inplace=True)
+    
+
     # Read the ratings database
     with open (ratingsfile) as f:
         ratings_db = json.load(f)
@@ -24,9 +40,24 @@ def setup_databases(preffile="./floats.csv", ratingsfile="./ratingsdb.json",
 
 # Update each ticker's ratings from ratings DB
 # There may be a more string-comphensiony way of doing this
+def company_ticker_from_pref_ticker(ticker):
+    company_ticker =  ticker.split(".",1)[0]
+    return company_ticker
+
+def add_company_ticker_to_frame(df, column='Company'):
+    df[column] = [ company_ticker_from_pref_ticker(ticker) for
+                   ticker in df['Ticker']]
+    return df
+
+    
+    
+
 
 
 def lookup_rating_by_ticker(ticker, rating_database):
+    return rating_database.get(company_ticker_from_pref_ticker(ticker))
+
+def add_company_tickerlookup_rating_by_ticker(ticker, rating_database):
     company_ticker =  ticker.split(".",1)[0]
     return rating_database.get(company_ticker)
 
@@ -34,7 +65,7 @@ def lookup_rating_by_ticker(ticker, rating_database):
     
 def update_ratings_from_db(df, rating_database):
     '''
-    Updates a preferred database from the per0company database
+    Updates a preferred database from the per0company database.
     '''
     df["Rating"] = [lookup_rating_by_ticker(pref_ticker, rating_database) for pref_ticker in df["Ticker"]]
                     
@@ -46,30 +77,42 @@ def fetch_prices(df, session, fetch=True):
         update_closing_prices(df,session)
         df.drop(columns=['RefPrice'],inplace=True,errors='ignore')
     else:
-        df.rename(columns={"RefPrice": "Price"})
+        df.rename(columns={"RefPrice": "Price"}, inplace=True)
         
     return df
         
 
 # Update yields
 def compute_annual_dividend(preftype, spread, mult, rates, faceval=25):
+#    print(preftype, spread, mult, rates)
     if preftype == 'P':
-        rate_percent = rates['prime']*mult
+        reference_rate = rates['prime']
+#        print ("Prime rate: ", reference_rate, type(reference_rate), "Mult: ", mult, type(mult))
+        rate_percent =  reference_rate * mult
     else:  # assume spread
         rate_percent = rates['tbill'] + spread/100 
     dividend = round(rate_percent/100 * faceval, 4)
     return dividend
 
 
-def update_div_and_yield(df, interest_db, price_column='Price'):
+def diff_from_mean(x,y):
+    return x-y
+
+
+def update_div_and_yield(df, interest_db, price_column='Price', type='float'):
     '''
     Creates columns 'AnnualDiv' and 'CurYieldPct'.
     '''
-    
-    df["AnnualDiv"] = [compute_annual_dividend(ptype,spread,mult,interest_db)
-                       for (ptype,spread,mult) in 
-                       zip(df["Type"],df["Spread"],df["Mult"])]
-    df["CurYieldPct"] = [round(div / price *100,4) for (div,price) in zip(df["AnnualDiv"],df[price_column])]
+
+    if type == 'float':
+        divcol = 'AnnualDiv'
+        df[divcol] = [compute_annual_dividend(ptype,spread,mult,interest_db)
+                      for (ptype,spread,mult) in 
+                      zip(df["Type"],df["Spread"],df["Mult"])]
+    else:
+        divcol = 'Div'
+
+    df["CurYieldPct"] = [round(div / price *100,4) for (div,price) in zip(df[divcol],df[price_column])]
 
     return df
 
@@ -78,7 +121,11 @@ def update_div_and_yield(df, interest_db, price_column='Price'):
 def convert_std_ticker_to_yahoo(ticker, exception_db={}):
     # check for exceptions here
     pieces = ticker.split(".")
-    return pieces[0]+'-P'+pieces[2]+'.TO'
+    if pieces[1] == "PF":
+        mid = "PF"
+    else:
+        mid="P"
+    return pieces[0]+'-'+mid+pieces[2]+'.TO'
 
 
 def extract_close_from_yfinance(data):
@@ -105,11 +152,19 @@ def update_closing_prices(df, session):
 ## =======================================
 
 
-def select_benchmark_rate(type, interest_db):
-    if type == 'T':
-        return interest_db['tbill']
-    else:
-        return interest_db['prime']
+def select_benchmark_rate(type, interest_db, preftype='float'):
+    if preftype == 'fixed':
+        return interest_db['goc5']
+
+    if preftype == 'float':
+        if type == 'T':
+            return interest_db['tbill']
+        else:
+            return interest_db['prime']
+
+    print("Unknownn pref type: ',preftype")
+    return None
+
 
     
 
@@ -119,10 +174,14 @@ def select_benchmark_rate(type, interest_db):
 def calc_market_spread(curyield, benchmark):
     return curyield - benchmark
 
-def update_market_spread(df, interest_db):
-    df['MSpread'] = [ calc_market_spread(curyield, select_benchmark_rate(type, interest_db))
-                     for (curyield, type) in
-                     zip(df["CurYieldPct"], df["Type"])]
+def update_market_spread(df, interest_db, preftype='float'):
+    if preftype == 'fixed':
+        df.insert(8, 'Type', 'Z')
+        
+        
+    df['MSpread'] = [ calc_market_spread(curyield, select_benchmark_rate(type, interest_db, preftype))
+                          for (curyield, type) in
+                          zip(df["CurYieldPct"], df["Type"])]
     return df
 
 
@@ -208,6 +267,13 @@ def calculate_avg_yield_per_rating(df):
 def calculate_avg_per_rating(df, column='CurYieldPct'):
     foo = pd.pivot_table(data=df,
                          index=['Rating'],
+                         values=column,
+                         aggfunc=['mean','count'])
+    return foo
+
+def calculate_avg_bucket_per_column(df, bucket='Rating', column='CurYieldPct'):
+    foo = pd.pivot_table(data=df,
+                         index=[bucket],
                          values=column,
                          aggfunc=['mean','count'])
     return foo

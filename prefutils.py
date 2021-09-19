@@ -64,15 +64,16 @@ def declared_dividend(tbill_rate_in_percent, issue_spread_in_bips, par=25):
 
 MINIMUM_TBILL_MARKET_SPREAD = 0.9
 
+# This function knows too much.
+
 def share_price_given_ref_rate_and_market_spread(ref_rate_in_percent,
                                               market_spread_in_percent, 
                                               issue_spread_in_bips, par=25, refi_max=0.75,
-                                                 min_spread = MINIMUM_TBILL_MARKET_SPREAD,
                                                  verbose=False):
 
   
-    # Clamp market spread to a mininum (useful for scenarios). This doesn't really belong here but outside
-    eff_market_spread_in_percent = max(market_spread_in_percent,min_spread)
+
+    eff_market_spread_in_percent = market_spread_in_percent
     
     yearly_dividend = declared_dividend(ref_rate_in_percent, issue_spread_in_bips, par)
     demanded_yield_in_percent = ref_rate_in_percent + eff_market_spread_in_percent

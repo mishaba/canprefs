@@ -48,6 +48,7 @@ def xirr(cashflows,guess=0.1):
 
     """
     
+    return optimize.newton(lambda r: xnpv(r,cashflows),guess,maxiter=200, rtol=0.0001)
+#    return optimize.newton(lambda r: xnpv(r,cashflows),guess,maxiter=200)
 
-    return optimize.newton(lambda r: xnpv(r,cashflows),guess)
 
