@@ -92,6 +92,7 @@ def compute_annual_dividend(preftype, spread, mult, rates, faceval=25):
     else:  # assume spread
         rate_percent = rates['tbill'] + spread/100 
     dividend = round(rate_percent/100 * faceval, 4)
+#    print(spread, dividend)
     return dividend
 
 
@@ -199,7 +200,7 @@ PAR_OFFSET_LIMIT = 0.50
 def eff_yield_inc_capgain(future_tbill_pct, spread_bips, mspread_pct, price, current_div, par=25, verbose=True):
     future_price = price_from_demand_yield(future_tbill_pct, mspread_pct, spread_bips)
     if future_price > (par + PAR_OFFSET_LIMIT):
-        print("Future Price clamped: ", future_price)
+        print("Future Price clamped: ", future_price, "spread: ", spread_bips, "price: ", price, "CurDiv ", current_div)
         future_price = par + PAR_OFFSET_LIMIT
         
     cap_gain = future_price - price
